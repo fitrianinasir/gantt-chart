@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 export type GanttTask = {
   id: string
   name: string
@@ -19,6 +21,7 @@ export type GanttChartProps = {
   onTasksChange?: (tasks: GanttTask[]) => void
   title?: string
   className?: string
+  leading?: ReactNode
 }
 
 /** Root + two nested layers. Depth is 0, 1, 2. */

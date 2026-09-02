@@ -1,6 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   addDays,
   differenceInCalendarDays,
@@ -298,6 +304,7 @@ export function GanttChart({
   onTasksChange,
   title = "Schedule",
   className,
+  leading,
 }: GanttChartProps) {
   const [internalTasks, setInternalTasks] = useState(tasksProp)
   const tasks = onTasksChange ? tasksProp : internalTasks
@@ -672,16 +679,14 @@ export function GanttChart({
         className
       )}
     >
-      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <div className="mr-auto flex min-w-0 items-center gap-2">
-          <CalendarIcon className="size-4 text-muted-foreground" />
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b px-3 py-2">
+        <div className="flex min-w-0 items-center">{leading}</div>
+        <div className="flex items-center justify-center gap-2">
+          <CalendarIcon className="size-4 shrink-0 text-muted-foreground" />
           <p className="truncate text-sm font-medium">{title}</p>
           <Badge variant="secondary">{rows.length} rows</Badge>
         </div>
-        <p className="hidden text-xs text-muted-foreground lg:block">
-          Ctrl + scroll to zoom · Drag empty calendar to pan · Drag bars to reschedule
-        </p>
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center justify-end gap-1">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1115,6 +1120,16 @@ export function GanttChart({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
+            {parentIdForNew ? (
+              <label className="grid gap-1.5 text-sm font-medium">
+                Parent Task
+                <Input
+                  value={findTask(tasks, parentIdForNew)?.name ?? ""}
+                  disabled
+                  readOnly
+                />
+              </label>
+            ) : null}
             <label className="grid gap-1.5 text-sm font-medium">
               Task name
               <Input

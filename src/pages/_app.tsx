@@ -2,9 +2,6 @@ import type { AppProps } from "next/app"
 import Head from "next/head"
 import { Geist, Geist_Mono } from "next/font/google"
 
-import { ThemeProvider } from "@/components/theme-provider"
-import { TooltipProvider } from "@/components/ui/tooltip"
-
 import "@/styles/globals.css"
 
 const geistSans = Geist({
@@ -34,11 +31,7 @@ export default function App({ Component, pageProps }: AppProps) {
         />
       </Head>
       <div className={`${geistSans.variable} ${geistMono.variable} min-h-full`}>
-        <ThemeProvider>
-          <TooltipProvider delay={250}>
-            <Component {...pageProps} />
-          </TooltipProvider>
-        </ThemeProvider>
+        <Component {...pageProps} />
       </div>
     </>
   )
