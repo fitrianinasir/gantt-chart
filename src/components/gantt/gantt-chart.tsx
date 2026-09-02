@@ -11,6 +11,7 @@ import {
   isWeekend,
   max as maxDate,
   min as minDate,
+  parse,
   parseISO,
   startOfDay,
 } from "date-fns"
@@ -18,6 +19,7 @@ import {
   CalendarIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  InfoIcon,
   PlusIcon,
   Trash2Icon,
   ZoomInIcon,
@@ -25,7 +27,6 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -44,13 +45,18 @@ import {
 } from "@/components/ui/tooltip"
 
 import {
-  barColorClass,
+  applyFamilyColor,
+  barFill,
+  barTextColor,
+  GANTT_COLOR_CYCLE,
   MAX_TASK_DEPTH,
   nextRootColor,
+  normalizeHex,
   type GanttBarColor,
   type GanttChartProps,
   type GanttTask,
 } from "./types"
+import { ThemeToggle } from "../theme-toggle"
 
 const ROW_HEIGHT = 44
 const HEADER_HEIGHT = 64
@@ -59,6 +65,9 @@ const MAX_DAY_WIDTH = 80
 const MIN_LEFT_WIDTH = 320
 const DEFAULT_LEFT_WIDTH = 640
 const DEFAULT_DAY_WIDTH = 28
+const TASK_COLUMNS = "minmax(168px,1.4fr) 108px 118px 118px 72px 120px"
+const LEFT_TABLE_MIN_WIDTH = 168 + 108 + 118 + 118 + 72 + 120
+const BAR_MOVE_THRESHOLD_PX = 6
 
 type FlatRow = GanttTask & {
   depth: number
@@ -88,11 +97,90 @@ function durationDays(start: string, end: string) {
   return Math.max(1, differenceInCalendarDays(parseDate(end), parseDate(start)) + 1)
 }
 
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "?"
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+function isStrictIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = parseISO(value)
+  return isValid(date) && format(date, "yyyy-MM-dd") === value
+}
+
+function isoToDisplayDate(iso: string) {
+  return isStrictIsoDate(iso) ? format(parseISO(iso), "dd/MM/yyyy") : ""
+}
+
+function displayDateToIso(value: string) {
+  const trimmed = value.trim()
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) return null
+  const parsed = parse(trimmed, "dd/MM/yyyy", new Date())
+  if (!isValid(parsed) || format(parsed, "dd/MM/yyyy") !== trimmed) return null
+  return format(parsed, "yyyy-MM-dd")
+}
+
+function maskDisplayDate(raw: string) {
+  const digits = raw.replace(/\D/g, "").slice(0, 8)
+  if (digits.length <= 2) return digits
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`
+}
+
+function DateInput({
+  value,
+  onChange,
+  className,
+  ...props
+}: {
+  value: string
+  onChange: (next: string) => void
+  className?: string
+} & Omit<React.ComponentProps<"input">, "value" | "onChange" | "type">) {
+  const [text, setText] = useState(() => isoToDisplayDate(value))
+
+  useEffect(() => {
+    setText(isoToDisplayDate(value))
+  }, [value])
+
+  const commitOrRevert = () => {
+    const iso = displayDateToIso(text)
+    if (iso) onChange(iso)
+    else setText(isoToDisplayDate(value))
+  }
+
+  return (
+    <span className="relative block">
+      <Input
+        type="text"
+        inputMode="numeric"
+        placeholder="dd/mm/yyyy"
+        maxLength={10}
+        value={text}
+        className={cn("pr-7", className)}
+        onChange={(event) => {
+          const next = maskDisplayDate(event.currentTarget.value)
+          setText(next)
+          const iso = displayDateToIso(next)
+          if (iso) onChange(iso)
+        }}
+        onBlur={commitOrRevert}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur()
+          }
+        }}
+        {...props}
+      />
+      <input
+        type="date"
+        value={isStrictIsoDate(value) ? value : ""}
+        tabIndex={-1}
+        aria-label="Open calendar"
+        className="absolute top-1/2 right-1 h-6 w-6 -translate-y-1/2 cursor-pointer opacity-0"
+        onChange={(event) => {
+          const next = event.currentTarget.value
+          if (isStrictIsoDate(next)) onChange(next)
+        }}
+      />
+      <CalendarIcon className="pointer-events-none absolute top-1/2 right-1.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+    </span>
+  )
 }
 
 function flattenTasks(
@@ -182,6 +270,29 @@ function clampDayWidth(value: number) {
   return Math.min(MAX_DAY_WIDTH, Math.max(MIN_DAY_WIDTH, value))
 }
 
+function FamilyColorControl({
+  color,
+  onChange,
+}: {
+  color: string
+  onChange: (color: string) => void
+}) {
+  const value = normalizeHex(color)
+  return (
+    <label className="relative size-4 shrink-0 cursor-pointer overflow-hidden rounded-full border border-input shadow-xs">
+      <span className="sr-only">Task color</span>
+      <span className="block size-full rounded-full" style={{ backgroundColor: value }} />
+      <input
+        type="color"
+        value={value}
+        title={value}
+        className="absolute inset-0 cursor-pointer opacity-0"
+        onChange={(event) => onChange(normalizeHex(event.target.value))}
+      />
+    </label>
+  )
+}
+
 export function GanttChart({
   tasks: tasksProp,
   onTasksChange,
@@ -205,17 +316,28 @@ export function GanttChart({
   const [dialogOpen, setDialogOpen] = useState(false)
   const [parentIdForNew, setParentIdForNew] = useState<string | null>(null)
   const [draftName, setDraftName] = useState("")
-  const [draftPic, setDraftPic] = useState("")
+  const [draftTeam, setDraftTeam] = useState("")
   const [draftStart, setDraftStart] = useState(toIso(new Date()))
   const [draftEnd, setDraftEnd] = useState(toIso(addDays(new Date(), 4)))
+  const [draftColor, setDraftColor] = useState(GANTT_COLOR_CYCLE[0])
+  const [descriptionOpen, setDescriptionOpen] = useState(false)
+  const [descriptionTaskId, setDescriptionTaskId] = useState<string | null>(null)
+  const [draftDescription, setDraftDescription] = useState("")
   const [drag, setDrag] = useState<DragState>(null)
 
   const chartRef = useRef<HTMLDivElement>(null)
   const leftBodyRef = useRef<HTMLDivElement>(null)
+  const leftHeaderRef = useRef<HTMLDivElement>(null)
   const timelineBodyRef = useRef<HTMLDivElement>(null)
   const timelineHeaderRef = useRef<HTMLDivElement>(null)
   const dayWidthRef = useRef(dayWidth)
   const dragRef = useRef<DragState>(null)
+  const pendingMoveRef = useRef<{
+    id: string
+    originX: number
+    start: string
+    end: string
+  } | null>(null)
   const splittingRef = useRef(false)
 
   useEffect(() => {
@@ -260,10 +382,11 @@ export function GanttChart({
       setTasks((current) =>
         mapTask(current, id, (task) => {
           const next = { ...task, ...patch }
-          if (parseDate(next.end) < parseDate(next.start)) {
-            next.end = next.start
+          const colored = patch.color ? applyFamilyColor(next, patch.color) : next
+          if (parseDate(colored.end) < parseDate(colored.start)) {
+            colored.end = colored.start
           }
-          return next
+          return colored
         })
       )
     },
@@ -287,25 +410,26 @@ export function GanttChart({
     const parent = parentId ? findTask(tasks, parentId) : undefined
     setParentIdForNew(parentId)
     setDraftName("")
-    setDraftPic(parent?.pic ?? "")
+    setDraftTeam(parent?.team ?? "")
     setDraftStart(parent?.start ?? toIso(today))
     setDraftEnd(parent?.end ?? toIso(addDays(today, 4)))
+    setDraftColor(parent?.color ?? nextRootColor(tasks))
     setDialogOpen(true)
   }
 
   const submitNewTask = () => {
     const name = draftName.trim() || "Untitled task"
-    const pic = draftPic.trim() || "Unassigned"
+    const team = draftTeam.trim() || "Unassigned"
     const start = draftStart || toIso(today)
     const end = parseDate(draftEnd) < parseDate(start) ? start : draftEnd
     const parent = parentIdForNew ? findTask(tasks, parentIdForNew) : undefined
     const task: GanttTask = {
       id: crypto.randomUUID(),
       name,
-      pic,
+      team,
       start,
       end,
-      color: parent?.color ?? nextRootColor(tasks),
+      color: parent?.color ?? normalizeHex(draftColor),
     }
     if (parentIdForNew) {
       setTasks((current) => insertChild(current, parentIdForNew, task))
@@ -320,12 +444,36 @@ export function GanttChart({
     setDialogOpen(false)
   }
 
+  const openDescription = (id: string) => {
+    const task = findTask(tasks, id)
+    if (!task) return
+    setDescriptionTaskId(id)
+    setDraftDescription(task.description ?? "")
+    setDescriptionOpen(true)
+  }
+
+  const saveDescription = () => {
+    if (!descriptionTaskId) return
+    updateTask(descriptionTaskId, { description: draftDescription.trim() })
+    setDescriptionOpen(false)
+  }
+
+  const descriptionTask = descriptionTaskId
+    ? findTask(tasks, descriptionTaskId)
+    : undefined
+
   const syncVertical = (source: "left" | "right") => {
     const left = leftBodyRef.current
     const right = timelineBodyRef.current
     if (!left || !right) return
     if (source === "left") right.scrollTop = left.scrollTop
     else left.scrollTop = right.scrollTop
+  }
+
+  const syncLeftHeader = () => {
+    if (leftHeaderRef.current && leftBodyRef.current) {
+      leftHeaderRef.current.scrollLeft = leftBodyRef.current.scrollLeft
+    }
   }
 
   const syncHeader = () => {
@@ -396,6 +544,26 @@ export function GanttChart({
         return
       }
 
+      const pending = pendingMoveRef.current
+      if (pending && !dragRef.current) {
+        if (Math.abs(event.clientX - pending.originX) < BAR_MOVE_THRESHOLD_PX) return
+        pendingMoveRef.current = null
+        event.preventDefault()
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur()
+        }
+        document.body.style.cursor = "grabbing"
+        const nextDrag: DragState = {
+          kind: "move",
+          id: pending.id,
+          originX: pending.originX,
+          start: pending.start,
+          end: pending.end,
+        }
+        dragRef.current = nextDrag
+        setDrag(nextDrag)
+      }
+
       const current = dragRef.current
       const el = timelineBodyRef.current
       if (!current || !el) return
@@ -418,6 +586,7 @@ export function GanttChart({
 
     const onUp = () => {
       splittingRef.current = false
+      pendingMoveRef.current = null
       setDrag(null)
       document.body.style.cursor = ""
     }
@@ -444,8 +613,25 @@ export function GanttChart({
     row: FlatRow,
     kind: "move" | "resize-start" | "resize-end"
   ) => {
+    if (event.button !== 0) return
     event.stopPropagation()
+
+    if (kind === "move") {
+      const target = event.target as HTMLElement
+      const title = target.closest("input")
+      if (title && document.activeElement === title) return
+      if (!title) event.preventDefault()
+      pendingMoveRef.current = {
+        id: row.id,
+        originX: event.clientX,
+        start: row.start,
+        end: row.end,
+      }
+      return
+    }
+
     event.preventDefault()
+    pendingMoveRef.current = null
     setDrag({
       kind,
       id: row.id,
@@ -562,6 +748,7 @@ export function GanttChart({
             <PlusIcon data-icon="inline-start" />
             Add task
           </Button>
+          <ThemeToggle />
         </div>
       </div>
 
@@ -571,23 +758,32 @@ export function GanttChart({
           style={{ width: leftWidth, maxWidth: "72%" }}
         >
           <div
-            className="grid shrink-0 items-center border-b bg-muted/40 text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
-            style={{
-              height: HEADER_HEIGHT,
-              gridTemplateColumns: "minmax(160px,1.4fr) 108px 118px 118px 72px 40px",
-            }}
+            ref={leftHeaderRef}
+            className="shrink-0 overflow-x-hidden overflow-y-hidden border-b bg-muted/40"
+            style={{ height: HEADER_HEIGHT }}
           >
-            <span className="px-3">Task name</span>
-            <span className="px-1">PIC</span>
-            <span className="px-1">Start date</span>
-            <span className="px-1">End date</span>
-            <span className="px-1">Duration</span>
-            <span className="sr-only">Add subtask</span>
+            <div
+              className="grid h-full items-center text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
+              style={{
+                minWidth: LEFT_TABLE_MIN_WIDTH,
+                gridTemplateColumns: TASK_COLUMNS,
+              }}
+            >
+              <span className="px-3">Task name</span>
+              <span className="px-1">Team</span>
+              <span className="px-1">Start date</span>
+              <span className="px-1">End date</span>
+              <span className="px-1">Duration</span>
+              <span className="sr-only">Row actions</span>
+            </div>
           </div>
           <div
             ref={leftBodyRef}
             className="min-h-0 flex-1 overflow-auto overscroll-none"
-            onScroll={() => syncVertical("left")}
+            onScroll={() => {
+              syncLeftHeader()
+              syncVertical("left")
+            }}
           >
             {rows.length === 0 ? (
               <div className="flex h-40 flex-col items-center justify-center gap-2 px-4 text-center">
@@ -607,7 +803,8 @@ export function GanttChart({
                   className="grid items-center border-b hover:bg-muted/40"
                   style={{
                     height: ROW_HEIGHT,
-                    gridTemplateColumns: "minmax(160px,1.4fr) 108px 118px 118px 72px 40px",
+                    minWidth: LEFT_TABLE_MIN_WIDTH,
+                    gridTemplateColumns: TASK_COLUMNS,
                   }}
                 >
                   <div
@@ -632,52 +829,29 @@ export function GanttChart({
                       className="h-7 border-transparent bg-transparent px-1.5 shadow-none hover:border-input focus-visible:border-ring dark:bg-transparent"
                       onChange={(event) => updateTask(row.id, { name: event.target.value })}
                     />
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            className="text-muted-foreground hover:text-destructive"
-                            aria-label="Delete task"
-                            onClick={() => setTasks((current) => removeTask(current, row.id))}
-                          />
-                        }
-                      >
-                        <Trash2Icon />
-                      </TooltipTrigger>
-                      <TooltipContent>Delete task</TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="flex min-w-0 items-center gap-1 px-1">
-                    <Avatar size="sm" className="size-5">
-                      <AvatarFallback className="text-[9px]">
-                        {initials(row.pic)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <Input
-                      value={row.pic}
-                      aria-label="PIC"
-                      className="h-7 border-transparent bg-transparent px-1 shadow-none hover:border-input focus-visible:border-ring dark:bg-transparent"
-                      onChange={(event) => updateTask(row.id, { pic: event.target.value })}
-                    />
                   </div>
                   <div className="px-1">
                     <Input
-                      type="date"
+                      value={row.team}
+                      aria-label="Team"
+                      className="h-7 border-transparent bg-transparent px-1 shadow-none hover:border-input focus-visible:border-ring dark:bg-transparent"
+                      onChange={(event) => updateTask(row.id, { team: event.target.value })}
+                    />
+                  </div>
+                  <div className="px-1">
+                    <DateInput
                       value={row.start}
                       aria-label="Start date"
                       className="h-7 px-1.5 text-xs"
-                      onChange={(event) => updateTask(row.id, { start: event.target.value })}
+                      onChange={(start) => updateTask(row.id, { start })}
                     />
                   </div>
                   <div className="px-1">
-                    <Input
-                      type="date"
+                    <DateInput
                       value={row.end}
                       aria-label="End date"
                       className="h-7 px-1.5 text-xs"
-                      onChange={(event) => updateTask(row.id, { end: event.target.value })}
+                      onChange={(end) => updateTask(row.id, { end })}
                     />
                   </div>
                   <div className="px-1">
@@ -695,7 +869,29 @@ export function GanttChart({
                       }}
                     />
                   </div>
-                  <div className="flex justify-center">
+                  <div className="flex items-center justify-center gap-0.5 px-0.5">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className={
+                              row.description
+                                ? "text-primary"
+                                : "text-muted-foreground"
+                            }
+                            aria-label="Task description"
+                            onClick={() => openDescription(row.id)}
+                          />
+                        }
+                      >
+                        <InfoIcon />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {row.description ? "Edit description" : "Add description"}
+                      </TooltipContent>
+                    </Tooltip>
                     {row.depth < MAX_TASK_DEPTH - 1 ? (
                       <Tooltip>
                         <TooltipTrigger
@@ -728,6 +924,30 @@ export function GanttChart({
                         </TooltipTrigger>
                         <TooltipContent>Maximum of 3 levels</TooltipContent>
                       </Tooltip>
+                    )}
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="text-muted-foreground hover:text-destructive"
+                            aria-label="Delete task"
+                            onClick={() => setTasks((current) => removeTask(current, row.id))}
+                          />
+                        }
+                      >
+                        <Trash2Icon />
+                      </TooltipTrigger>
+                      <TooltipContent>Delete task</TooltipContent>
+                    </Tooltip>
+                    {row.depth === 0 ? (
+                      <FamilyColorControl
+                        color={row.color}
+                        onChange={(color) => updateTask(row.id, { color })}
+                      />
+                    ) : (
+                      <span className="size-4 shrink-0" />
                     )}
                   </div>
                 </div>
@@ -829,6 +1049,8 @@ export function GanttChart({
                 const span = durationDays(row.start, row.end)
                 const left = offset * dayWidth
                 const width = Math.max(span * dayWidth - 4, 8)
+                const fill = barFill(row.color, row.depth)
+                const ink = barTextColor(fill)
                 return (
                   <div
                     key={`bar-${row.id}`}
@@ -840,27 +1062,37 @@ export function GanttChart({
                         render={
                           <div
                             data-gantt-bar=""
-                            className={cn(
-                              "absolute top-2.5 flex h-7 cursor-grab items-center rounded-md px-2 text-xs font-medium shadow-sm active:cursor-grabbing",
-                              barColorClass(row.color, row.depth)
-                            )}
-                            style={{ left: left + 2, width }}
+                            className="absolute top-2.5 flex h-7 cursor-grab items-center rounded-md px-1.5 text-xs font-medium shadow-sm hover:brightness-90 active:cursor-grabbing"
+                            style={{
+                              left: left + 2,
+                              width,
+                              backgroundColor: fill,
+                              color: ink,
+                            }}
                             onPointerDown={(event) => beginBarDrag(event, row, "move")}
                           />
                         }
                       >
                         <span
-                          className="absolute top-0 h-full w-1.5 cursor-ew-resize rounded-l-md"
+                          className="absolute top-0 left-0 z-10 h-full w-1.5 cursor-ew-resize rounded-l-md"
                           onPointerDown={(event) => beginBarDrag(event, row, "resize-start")}
                         />
-                        <span className="truncate">{width > 72 ? row.name : ""}</span>
+                        <input
+                          value={row.name}
+                          aria-label="Task name on timeline"
+                          className="relative z-[1] h-full min-w-0 flex-1 cursor-grab bg-transparent px-1 text-xs font-medium outline-none select-text placeholder:opacity-60 focus:cursor-text"
+                          style={{ color: ink }}
+                          onChange={(event) =>
+                            updateTask(row.id, { name: event.target.value })
+                          }
+                        />
                         <span
-                          className="absolute top-0 right-0 h-full w-1.5 cursor-ew-resize rounded-r-md"
+                          className="absolute top-0 right-0 z-10 h-full w-1.5 cursor-ew-resize rounded-r-md"
                           onPointerDown={(event) => beginBarDrag(event, row, "resize-end")}
                         />
                       </TooltipTrigger>
                       <TooltipContent>
-                        {row.name} · {row.pic} · {format(parseDate(row.start), "MMM d")} –{" "}
+                        {row.name} · {row.team} · {format(parseDate(row.start), "MMM d")} –{" "}
                         {format(parseDate(row.end), "MMM d")} ({span}d)
                       </TooltipContent>
                     </Tooltip>
@@ -892,37 +1124,70 @@ export function GanttChart({
               />
             </label>
             <label className="grid gap-1.5 text-sm font-medium">
-              PIC
+              Team
               <Input
-                value={draftPic}
-                placeholder="Owner name"
-                onChange={(event) => setDraftPic(event.target.value)}
+                value={draftTeam}
+                placeholder="Team name"
+                onChange={(event) => setDraftTeam(event.target.value)}
               />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="grid gap-1.5 text-sm font-medium">
                 Start date
-                <Input
-                  type="date"
+                <DateInput
                   value={draftStart}
-                  onChange={(event) => setDraftStart(event.target.value)}
+                  onChange={setDraftStart}
                 />
               </label>
               <label className="grid gap-1.5 text-sm font-medium">
                 End date
-                <Input
-                  type="date"
+                <DateInput
                   value={draftEnd}
-                  onChange={(event) => setDraftEnd(event.target.value)}
+                  onChange={setDraftEnd}
                 />
               </label>
             </div>
+            {!parentIdForNew && (
+              <div className="grid gap-1.5 text-sm font-medium">
+                Bar color
+                <FamilyColorControl color={draftColor} onChange={setDraftColor} />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
             <Button onClick={submitNewTask}>Save task</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={descriptionOpen} onOpenChange={setDescriptionOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Task description</DialogTitle>
+            <DialogDescription>
+              {descriptionTask
+                ? `Notes for ${descriptionTask.name}.`
+                : "Add extra detail for this task."}
+            </DialogDescription>
+          </DialogHeader>
+          <label className="grid gap-1.5 text-sm font-medium">
+            Description
+            <textarea
+              value={draftDescription}
+              rows={6}
+              placeholder="Write additional context, links, or notes"
+              className="min-h-32 w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+              onChange={(event) => setDraftDescription(event.target.value)}
+            />
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDescriptionOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveDescription}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

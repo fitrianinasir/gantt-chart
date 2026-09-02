@@ -13,7 +13,8 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## What you can do
 
-- Edit task name, PIC, start date, end date, and duration inline
+- Edit task name, team, start date, end date, and duration inline
+- Add a task description from the **i** control beside **+**
 - Add a top-level task or nest a subtask with the **+** control (up to 3 levels)
 - Each parent bar uses a distinct color; nested rows use lighter shades of that parent
 - Collapse parent rows, resize the task list, and delete tasks

@@ -1,22 +1,18 @@
 export type GanttTask = {
   id: string
   name: string
-  pic: string
+  team: string
   start: string
   end: string
+  /** Hex fill for the family, e.g. `#0284c7`. Subtasks inherit a lighter mix. */
   color: GanttBarColor
+  /** Optional notes shown in the task details dialog. */
+  description?: string
   children?: GanttTask[]
 }
 
-export type GanttBarColor =
-  | "sky"
-  | "violet"
-  | "emerald"
-  | "amber"
-  | "rose"
-  | "cyan"
-  | "indigo"
-  | "orange"
+/** Hex color string such as `#0284c7`. */
+export type GanttBarColor = string
 
 export type GanttChartProps = {
   tasks: GanttTask[]
@@ -28,67 +24,80 @@ export type GanttChartProps = {
 /** Root + two nested layers. Depth is 0, 1, 2. */
 export const MAX_TASK_DEPTH = 3
 
-export const GANTT_BAR_COLORS: Record<GanttBarColor, [string, string, string]> = {
-  sky: [
-    "bg-sky-600 hover:bg-sky-700 text-white",
-    "bg-sky-400 hover:bg-sky-500 text-white",
-    "bg-sky-200 hover:bg-sky-300 text-sky-950",
-  ],
-  violet: [
-    "bg-violet-600 hover:bg-violet-700 text-white",
-    "bg-violet-400 hover:bg-violet-500 text-white",
-    "bg-violet-200 hover:bg-violet-300 text-violet-950",
-  ],
-  emerald: [
-    "bg-emerald-600 hover:bg-emerald-700 text-white",
-    "bg-emerald-400 hover:bg-emerald-500 text-white",
-    "bg-emerald-200 hover:bg-emerald-300 text-emerald-950",
-  ],
-  amber: [
-    "bg-amber-600 hover:bg-amber-700 text-white",
-    "bg-amber-400 hover:bg-amber-500 text-white",
-    "bg-amber-200 hover:bg-amber-300 text-amber-950",
-  ],
-  rose: [
-    "bg-rose-600 hover:bg-rose-700 text-white",
-    "bg-rose-400 hover:bg-rose-500 text-white",
-    "bg-rose-200 hover:bg-rose-300 text-rose-950",
-  ],
-  cyan: [
-    "bg-cyan-600 hover:bg-cyan-700 text-white",
-    "bg-cyan-400 hover:bg-cyan-500 text-white",
-    "bg-cyan-200 hover:bg-cyan-300 text-cyan-950",
-  ],
-  indigo: [
-    "bg-indigo-600 hover:bg-indigo-700 text-white",
-    "bg-indigo-400 hover:bg-indigo-500 text-white",
-    "bg-indigo-200 hover:bg-indigo-300 text-indigo-950",
-  ],
-  orange: [
-    "bg-orange-600 hover:bg-orange-700 text-white",
-    "bg-orange-400 hover:bg-orange-500 text-white",
-    "bg-orange-200 hover:bg-orange-300 text-orange-950",
-  ],
-}
-
 export const GANTT_COLOR_CYCLE: GanttBarColor[] = [
-  "sky",
-  "violet",
-  "emerald",
-  "amber",
-  "rose",
-  "cyan",
-  "indigo",
-  "orange",
+  "#0284c7",
+  "#7c3aed",
+  "#059669",
+  "#d97706",
+  "#e11d48",
+  "#0891b2",
+  "#4f46e5",
+  "#ea580c",
 ]
 
-export function barColorClass(color: GanttBarColor, depth: number) {
-  const shades = GANTT_BAR_COLORS[color]
-  return shades[Math.min(Math.max(depth, 0), shades.length - 1)]
+const FALLBACK_HEX = "#64748b"
+const LIGHTEN_BY_DEPTH = [0, 0.34, 0.58]
+
+export function normalizeHex(value: string): GanttBarColor {
+  const raw = value.trim()
+  const short = /^#([0-9a-fA-F]{3})$/.exec(raw)
+  if (short) {
+    const [r, g, b] = short[1]
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase()
+  }
+  const full = /^#([0-9a-fA-F]{6})$/.exec(raw)
+  if (full) return `#${full[1]}`.toLowerCase()
+  return FALLBACK_HEX
+}
+
+function parseRgb(hex: string): [number, number, number] {
+  const normalized = normalizeHex(hex).slice(1)
+  const int = Number.parseInt(normalized, 16)
+  return [(int >> 16) & 255, (int >> 8) & 255, int & 255]
+}
+
+function toHex(r: number, g: number, b: number): GanttBarColor {
+  return `#${[r, g, b]
+    .map((channel) => channel.toString(16).padStart(2, "0"))
+    .join("")}`
+}
+
+export function mixWithWhite(hex: string, amount: number): GanttBarColor {
+  const t = Math.min(1, Math.max(0, amount))
+  const [r, g, b] = parseRgb(hex)
+  return toHex(
+    Math.round(r + (255 - r) * t),
+    Math.round(g + (255 - g) * t),
+    Math.round(b + (255 - b) * t)
+  )
+}
+
+export function barFill(hex: string, depth: number): GanttBarColor {
+  const amount =
+    LIGHTEN_BY_DEPTH[Math.min(Math.max(depth, 0), LIGHTEN_BY_DEPTH.length - 1)]
+  return mixWithWhite(hex, amount)
+}
+
+export function barTextColor(fill: string): string {
+  const [r, g, b] = parseRgb(fill).map((channel) => {
+    const s = channel / 255
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  })
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return luminance > 0.55 ? "#0f172a" : "#ffffff"
+}
+
+export function applyFamilyColor(task: GanttTask, color: GanttBarColor): GanttTask {
+  const next = normalizeHex(color)
+  return {
+    ...task,
+    color: next,
+    children: task.children?.map((child) => applyFamilyColor(child, next)),
+  }
 }
 
 export function nextRootColor(tasks: GanttTask[]): GanttBarColor {
-  const used = new Set(tasks.map((task) => task.color))
+  const used = new Set(tasks.map((task) => normalizeHex(task.color)))
   return (
     GANTT_COLOR_CYCLE.find((color) => !used.has(color)) ??
     GANTT_COLOR_CYCLE[tasks.length % GANTT_COLOR_CYCLE.length]

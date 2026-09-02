@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import "@/styles/globals.css"
 
 const geistSans = Geist({
-  variable: "--font-sans",
+  variable: "--font-geist-sans",
   subsets: ["latin"],
 })
 
@@ -27,10 +27,13 @@ export default function App({ Component, pageProps }: AppProps) {
           content="A reusable timeline planner with a task list and zoomable calendar."
         />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `:root{--font-geist-sans:${geistSans.style.fontFamily};--font-geist-mono:${geistMono.style.fontFamily}}`,
+          }}
+        />
       </Head>
-      <div
-        className={`${geistSans.variable} ${geistMono.variable} min-h-full`}
-      >
+      <div className={`${geistSans.variable} ${geistMono.variable} min-h-full`}>
         <ThemeProvider>
           <TooltipProvider delay={250}>
             <Component {...pageProps} />
