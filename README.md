@@ -1,6 +1,6 @@
 # Gantt Chart
 
-A Next.js timeline planner with a task table on the left and a zoomable calendar on the right. Built with Tailwind CSS and shadcn/ui, including light and dark mode.
+A Next.js (Pages Router) timeline planner with a task table on the left and a zoomable calendar on the right. Built with Tailwind CSS and shadcn/ui, including light and dark mode.
 
 ## Run locally
 

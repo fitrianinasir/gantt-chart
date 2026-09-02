@@ -1,11 +1,9 @@
-"use client"
-
 import { useState } from "react"
 
 import { GanttChart, sampleTasks, type GanttTask } from "@/components/gantt"
 import { ThemeToggle } from "@/components/theme-toggle"
 
-export default function Home() {
+export default function HomePage() {
   const [tasks, setTasks] = useState<GanttTask[]>(sampleTasks)
 
   return (
