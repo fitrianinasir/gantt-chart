@@ -16,6 +16,16 @@ export const sampleTasks: GanttTask[] = [
         start: "2026-08-18",
         end: "2026-08-27",
         color: "sky",
+        children: [
+          {
+            id: "interview-scripts",
+            name: "Interview scripts",
+            pic: "Ava Chen",
+            start: "2026-08-18",
+            end: "2026-08-21",
+            color: "sky",
+          },
+        ],
       },
       {
         id: "research",

@@ -14,7 +14,8 @@ Open [http://localhost:3000](http://localhost:3000).
 ## What you can do
 
 - Edit task name, PIC, start date, end date, and duration inline
-- Add a top-level task or nest a subtask with the **+** control
+- Add a top-level task or nest a subtask with the **+** control (up to 3 levels)
+- Each parent bar uses a distinct color; nested rows use lighter shades of that parent
 - Collapse parent rows, resize the task list, and delete tasks
 - Drag bars to move dates, drag bar edges to change duration
 - Drag empty calendar space to pan

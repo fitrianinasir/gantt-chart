@@ -44,8 +44,9 @@ import {
 } from "@/components/ui/tooltip"
 
 import {
-  GANTT_BAR_COLORS,
-  GANTT_COLOR_CYCLE,
+  barColorClass,
+  MAX_TASK_DEPTH,
+  nextRootColor,
   type GanttBarColor,
   type GanttChartProps,
   type GanttTask,
@@ -94,13 +95,19 @@ function initials(name: string) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
 }
 
-function flattenTasks(tasks: GanttTask[], collapsed: Set<string>, depth = 0): FlatRow[] {
+function flattenTasks(
+  tasks: GanttTask[],
+  collapsed: Set<string>,
+  depth = 0,
+  familyColor?: GanttBarColor
+): FlatRow[] {
   const rows: FlatRow[] = []
   for (const task of tasks) {
+    const color = depth === 0 ? task.color : (familyColor ?? task.color)
     const hasChildren = Boolean(task.children?.length)
-    rows.push({ ...task, depth, hasChildren })
-    if (hasChildren && !collapsed.has(task.id)) {
-      rows.push(...flattenTasks(task.children ?? [], collapsed, depth + 1))
+    rows.push({ ...task, color, depth, hasChildren })
+    if (hasChildren && !collapsed.has(task.id) && depth < MAX_TASK_DEPTH - 1) {
+      rows.push(...flattenTasks(task.children ?? [], collapsed, depth + 1, color))
     }
   }
   return rows
@@ -116,13 +123,19 @@ function mapTask(tasks: GanttTask[], id: string, mapper: (task: GanttTask) => Ga
   })
 }
 
-function insertChild(tasks: GanttTask[], parentId: string, child: GanttTask): GanttTask[] {
+function insertChild(
+  tasks: GanttTask[],
+  parentId: string,
+  child: GanttTask,
+  depth = 0
+): GanttTask[] {
   return tasks.map((task) => {
     if (task.id === parentId) {
+      if (depth >= MAX_TASK_DEPTH - 1) return task
       return { ...task, children: [...(task.children ?? []), child] }
     }
     if (task.children?.length) {
-      return { ...task, children: insertChild(task.children, parentId, child) }
+      return { ...task, children: insertChild(task.children, parentId, child, depth + 1) }
     }
     return task
   })
@@ -134,6 +147,17 @@ function removeTask(tasks: GanttTask[], id: string): GanttTask[] {
     .map((task) =>
       task.children?.length ? { ...task, children: removeTask(task.children, id) } : task
     )
+}
+
+function findTaskDepth(tasks: GanttTask[], id: string, depth = 0): number | null {
+  for (const task of tasks) {
+    if (task.id === id) return depth
+    if (task.children?.length) {
+      const nested = findTaskDepth(task.children, id, depth + 1)
+      if (nested !== null) return nested
+    }
+  }
+  return null
 }
 
 function findTask(tasks: GanttTask[], id: string): GanttTask | undefined {
@@ -152,10 +176,6 @@ function collectDates(tasks: GanttTask[], dates: Date[] = []) {
     if (task.children?.length) collectDates(task.children, dates)
   }
   return dates
-}
-
-function nextColor(index: number): GanttBarColor {
-  return GANTT_COLOR_CYCLE[index % GANTT_COLOR_CYCLE.length]
 }
 
 function clampDayWidth(value: number) {
@@ -260,6 +280,10 @@ export function GanttChart({
   }
 
   const openNewTask = (parentId: string | null) => {
+    if (parentId !== null) {
+      const depth = findTaskDepth(tasks, parentId)
+      if (depth === null || depth >= MAX_TASK_DEPTH - 1) return
+    }
     const parent = parentId ? findTask(tasks, parentId) : undefined
     setParentIdForNew(parentId)
     setDraftName("")
@@ -274,13 +298,14 @@ export function GanttChart({
     const pic = draftPic.trim() || "Unassigned"
     const start = draftStart || toIso(today)
     const end = parseDate(draftEnd) < parseDate(start) ? start : draftEnd
+    const parent = parentIdForNew ? findTask(tasks, parentIdForNew) : undefined
     const task: GanttTask = {
       id: crypto.randomUUID(),
       name,
       pic,
       start,
       end,
-      color: nextColor(rows.length),
+      color: parent?.color ?? nextRootColor(tasks),
     }
     if (parentIdForNew) {
       setTasks((current) => insertChild(current, parentIdForNew, task))
@@ -671,21 +696,39 @@ export function GanttChart({
                     />
                   </div>
                   <div className="flex justify-center">
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label="Add subtask"
-                            onClick={() => openNewTask(row.id)}
-                          />
-                        }
-                      >
-                        <PlusIcon />
-                      </TooltipTrigger>
-                      <TooltipContent>Add subtask</TooltipContent>
-                    </Tooltip>
+                    {row.depth < MAX_TASK_DEPTH - 1 ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              aria-label="Add subtask"
+                              onClick={() => openNewTask(row.id)}
+                            />
+                          }
+                        >
+                          <PlusIcon />
+                        </TooltipTrigger>
+                        <TooltipContent>Add subtask</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              aria-label="Maximum of 3 levels"
+                              disabled
+                            />
+                          }
+                        >
+                          <PlusIcon />
+                        </TooltipTrigger>
+                        <TooltipContent>Maximum of 3 levels</TooltipContent>
+                      </Tooltip>
+                    )}
                   </div>
                 </div>
               ))
@@ -798,9 +841,8 @@ export function GanttChart({
                           <div
                             data-gantt-bar=""
                             className={cn(
-                              "absolute top-2.5 flex h-7 cursor-grab items-center rounded-md px-2 text-xs font-medium text-white shadow-sm active:cursor-grabbing",
-                              GANTT_BAR_COLORS[row.color],
-                              row.hasChildren && "h-6 top-3 opacity-90"
+                              "absolute top-2.5 flex h-7 cursor-grab items-center rounded-md px-2 text-xs font-medium shadow-sm active:cursor-grabbing",
+                              barColorClass(row.color, row.depth)
                             )}
                             style={{ left: left + 2, width }}
                             onPointerDown={(event) => beginBarDrag(event, row, "move")}
